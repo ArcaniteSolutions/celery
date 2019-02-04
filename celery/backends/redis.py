@@ -78,6 +78,22 @@ logger = get_logger(__name__)
 class ResultConsumer(BaseResultConsumer):
     _pubsub = None
 
+    def ___drain(self):
+        # return
+        while True:
+            while self.drain_events():
+                pass
+
+            for t in list(self.subscribed_to)[::]:
+                m = self.backend.get(t)
+                if m:
+                    m = self._decode_result(m)
+                    if m['status'] in states.READY_STATES:
+                        self.on_state_change(m, m)
+
+            import time
+            time.sleep(1)
+
     def __init__(self, *args, **kwargs):
         super(ResultConsumer, self).__init__(*args, **kwargs)
         self._get_key_for_task = self.backend.get_key_for_task
@@ -105,6 +121,8 @@ class ResultConsumer(BaseResultConsumer):
         self._pubsub = self.backend.client.pubsub(
             ignore_subscribe_messages=True,
         )
+        import threading
+        threading.Thread(target=self.___drain, daemon=True).start()
         self._consume_from(initial_task_id)
 
     def on_wait_for_pending(self, result, **kwargs):
@@ -117,26 +135,33 @@ class ResultConsumer(BaseResultConsumer):
             self._pubsub.close()
 
     def drain_events(self, timeout=None):
-        m = self._pubsub.get_message(timeout=timeout)
-        if m and m['type'] == 'message':
-            self.on_state_change(self._decode_result(m['data']), m)
+        if self.subscribed_to:
+            message = self._pubsub.get_message(timeout=timeout)
+            # print("D {}".format(message))
+            if message and message['type'] == 'message':
+                self.on_state_change(self._decode_result(message['data']), message)
+            if message:
+                return True
 
     def consume_from(self, task_id):
         if self._pubsub is None:
             return self.start(task_id)
-        self._consume_from(task_id)
+        else:
+            self._consume_from(task_id)
 
     def _consume_from(self, task_id):
         key = self._get_key_for_task(task_id)
         if key not in self.subscribed_to:
             self.subscribed_to.add(key)
             self._pubsub.subscribe(key)
+            # print("Subbed to {}".format(key))
 
     def cancel_for(self, task_id):
         if self._pubsub:
             key = self._get_key_for_task(task_id)
             self.subscribed_to.discard(key)
             self._pubsub.unsubscribe(key)
+            # print("Unsubbed to {}".format(key))
 
 
 class RedisBackend(BaseKeyValueStoreBackend, AsyncBackendMixin):
@@ -377,6 +402,7 @@ class RedisBackend(BaseKeyValueStoreBackend, AsyncBackendMixin):
                         callback,
                         ChordError('Callback error: {0!r}'.format(exc)),
                     )
+
         except ChordError as exc:
             logger.exception('Chord %r raised: %r', request.group, exc)
             return self.chord_error_from_stack(callback, exc)
@@ -449,13 +475,13 @@ class SentinelBackend(RedisBackend):
             data = super(SentinelBackend, self)._params_from_url(
                 url=chunk, defaults=defaults)
             connparams['hosts'].append(data)
-        for p in ("host", "port", "db", "password"):
-            connparams.pop(p)
+        for param in ("host", "port", "db", "password"):
+            connparams.pop(param)
 
         # Adding db/password in connparams to connect to the correct instance
-        for p in ("db", "password"):
-            if connparams['hosts'] and p in connparams['hosts'][0]:
-                connparams[p] = connparams['hosts'][0].get(p)
+        for param in ("db", "password"):
+            if connparams['hosts'] and param in connparams['hosts'][0]:
+                connparams[param] = connparams['hosts'][0].get(param)
         return connparams
 
     def _get_sentinel_instance(self, **params):
