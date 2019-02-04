@@ -81,7 +81,7 @@ class ResultConsumer(BaseResultConsumer):
     def ___drain(self):
         # return
         while True:
-            while self.drain_events():
+            while self.drain_events(1):
                 pass
 
             for t in list(self.subscribed_to)[::]:
@@ -119,7 +119,7 @@ class ResultConsumer(BaseResultConsumer):
 
     def start(self, initial_task_id, **kwargs):
         self._pubsub = self.backend.client.pubsub(
-            ignore_subscribe_messages=True,
+            ignore_subscribe_messages=False,
         )
         import threading
         threading.Thread(target=self.___drain, daemon=True).start()
@@ -136,11 +136,16 @@ class ResultConsumer(BaseResultConsumer):
 
     def drain_events(self, timeout=None):
         if self.subscribed_to:
+            got_one = False
             message = self._pubsub.get_message(timeout=timeout)
-            # print("D {}".format(message))
-            if message and message['type'] == 'message':
-                self.on_state_change(self._decode_result(message['data']), message)
-            if message:
+            while message:
+                if message and message['type'] == 'message':
+                    self.on_state_change(self._decode_result(message['data']), message)
+
+                    got_one = True
+
+                message = self._pubsub.get_message(timeout=timeout)
+            if got_one:
                 return True
 
     def consume_from(self, task_id):
@@ -154,14 +159,12 @@ class ResultConsumer(BaseResultConsumer):
         if key not in self.subscribed_to:
             self.subscribed_to.add(key)
             self._pubsub.subscribe(key)
-            # print("Subbed to {}".format(key))
 
     def cancel_for(self, task_id):
         if self._pubsub:
             key = self._get_key_for_task(task_id)
             self.subscribed_to.discard(key)
             self._pubsub.unsubscribe(key)
-            # print("Unsubbed to {}".format(key))
 
 
 class RedisBackend(BaseKeyValueStoreBackend, AsyncBackendMixin):
