@@ -4,6 +4,7 @@ from __future__ import absolute_import, unicode_literals
 
 from functools import partial
 from ssl import CERT_NONE, CERT_OPTIONAL, CERT_REQUIRED
+import time
 
 from kombu.utils.functional import retry_over_time
 from kombu.utils.objects import cached_property
@@ -81,7 +82,7 @@ class ResultConsumer(BaseResultConsumer):
     def ___drain(self):
         # return
         while True:
-            while self.drain_events(1):
+            while self.__drain_events(1):
                 pass
 
             for t in list(self.subscribed_to)[::]:
@@ -135,6 +136,10 @@ class ResultConsumer(BaseResultConsumer):
             self._pubsub.close()
 
     def drain_events(self, timeout=None):
+        if timeout:
+            time.sleep(timeout)
+
+    def __drain_events(self, timeout=None):
         if self.subscribed_to:
             got_one = False
             message = self._pubsub.get_message(timeout=timeout)
