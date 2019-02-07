@@ -77,7 +77,6 @@ class Logging(object):
         return handled
 
     def redirect_stdouts(self, loglevel=None, name='celery.redirected'):
-        return
         self.redirect_stdouts_to_logger(
             get_logger(name), loglevel=loglevel
         )

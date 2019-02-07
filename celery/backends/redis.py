@@ -22,6 +22,7 @@ from celery.utils.time import humanize_seconds
 
 from .asynchronous import AsyncBackendMixin, BaseResultConsumer
 from .base import BaseKeyValueStoreBackend
+import uuid
 
 try:
     from urllib.parse import unquote
@@ -339,12 +340,14 @@ class RedisBackend(BaseKeyValueStoreBackend, AsyncBackendMixin):
         self.client.delete(key)
 
     def incr(self, key):
+        print("Someone incr {}".format(key))
         return self.client.incr(key)
 
     def expire(self, key, value):
         return self.client.expire(key, value)
 
     def add_to_chord(self, group_id, result):
+        print("Add to chord {}".format(group_id))
         self.client.incr(self.get_key_for_group(group_id, '.t'), 1)
 
     def _unpack_chord_result(self, tup, decode,
@@ -385,12 +388,18 @@ class RedisBackend(BaseKeyValueStoreBackend, AsyncBackendMixin):
                 .expire(tkey, self.expires) \
                 .execute()
 
+        tmpid_excution = str(uuid.uuid4()).split('-')[0]
+
+        print("Chord part return {} {} {} {}".format(gid, readycount, totaldiff, tmpid_excution))
+
         totaldiff = int(totaldiff or 0)
 
         try:
             callback = maybe_signature(request.chord, app=app)
             total = callback['chord_size'] + totaldiff
+            print("Total: {} {}+{} {} {} {}".format(gid, total, callback['chord_size'], totaldiff, readycount, tmpid_excution))
             if readycount == total:
+                print("{} is done {}".format(gid, tmpid_excution))
                 decode, unpack = self.decode, self._unpack_chord_result
                 with client.pipeline() as pipe:
                     resl, = pipe \
@@ -410,11 +419,15 @@ class RedisBackend(BaseKeyValueStoreBackend, AsyncBackendMixin):
                         callback,
                         ChordError('Callback error: {0!r}'.format(exc)),
                     )
+            else:
+                print("{} is not done {}".format(gid, tmpid_excution))
 
         except ChordError as exc:
+            print("{} error {}".format(tmpid_excution, exc))
             logger.exception('Chord %r raised: %r', request.group, exc)
             return self.chord_error_from_stack(callback, exc)
         except Exception as exc:  # pylint: disable=broad-except
+            print("{} error {}".format(tmpid_excution, exc))
             logger.exception('Chord %r raised: %r', request.group, exc)
             return self.chord_error_from_stack(
                 callback,
